@@ -1,3 +1,6 @@
 .venv
-split_output
 .env
+.vscode
+__pycache__
+
+out
