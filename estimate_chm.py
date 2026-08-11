@@ -13,7 +13,6 @@ model_id = "facebook/dinov3-vitl16-chmv2-dpt-head"
 processor = AutoImageProcessor.from_pretrained(model_id, trust_remote_code=True)
 model = AutoModelForDepthEstimation.from_pretrained(model_id, device_map="auto", trust_remote_code=True)
 
-
 def get_depth(imagery_file: Path):
     image = Image.open(imagery_file)
 

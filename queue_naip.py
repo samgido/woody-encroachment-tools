@@ -3,7 +3,7 @@ Uses the USGS M2M API to add all images under a given spatial extent to the acco
 """
 import os
 import sys
-import time
+from time import time
 from pathlib import Path
 import dotenv
 from shapely import Polygon
@@ -47,9 +47,9 @@ class M2M(M2M_base):
         spatialFilter = SpatialFilterGeoJson(filterType='geojson', geoJson=geoJson).dict
         sceneFilter = SceneFilter(spatialFilter=spatialFilter).dict
 
-        dawn = time.time()
+        dawn = time()
         sceneSearchResult = self.sceneSearch(datasetName=datasetName, sceneFilter=sceneFilter)
-        dusk = time.time()
+        dusk = time()
         if self.loud_mode: print(f"\tScene search took {dusk-dawn} seconds")
 
         return sceneSearchResult
