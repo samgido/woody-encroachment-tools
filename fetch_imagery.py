@@ -9,6 +9,7 @@ from tempfile import TemporaryDirectory
 from pathlib import Path
 from contextlib import ExitStack
 from shapely.geometry import Polygon
+from tempfile import NamedTemporaryFile
 
 def get_site_imagery(aoi: gpd.GeoDataFrame, dst_path: Path, year: int=2023) -> bool:
     aoi_geom = aoi.union_all().__geo_interface__
@@ -122,4 +123,11 @@ if __name__ == '__main__':
         crs='EPSG:4326'
     )
 
-    get_site_imagery(aoi, Path('./final3.tif'))
+    dir = None
+    if (t := Path(Path.home() / 'Downloads')).is_dir():
+        dir = t
+
+    tf = NamedTemporaryFile(dir=dir, suffix='.tiff')
+
+    print(f'Downloading example image to {tf.name}')
+    get_site_imagery(aoi, Path(tf.name))
