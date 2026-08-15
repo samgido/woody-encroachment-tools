@@ -105,8 +105,6 @@ def get_site_imagery(aoi: gpd.GeoDataFrame, dst_path: Path, year: int=2023) -> b
                 count=4 # keep 4 here, incase its wanted elsewhere
             )
 
-            breakpoint()
-
             with rasterio.open(dst_path, 'w', **mosaic_profile) as dst:
                 dst.write(mosaic)
 
