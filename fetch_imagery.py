@@ -102,8 +102,10 @@ def get_site_imagery(aoi: gpd.GeoDataFrame, dst_path: Path, year: int=2023) -> b
                 height=mosaic.shape[1],
                 width=mosaic.shape[2],
                 transform=transform,
-                count=4
+                count=4 # keep 4 here, incase its wanted elsewhere
             )
+
+            breakpoint()
 
             with rasterio.open(dst_path, 'w', **mosaic_profile) as dst:
                 dst.write(mosaic)
@@ -126,8 +128,11 @@ if __name__ == '__main__':
     dir = None
     if (t := Path(Path.home() / 'Downloads')).is_dir():
         dir = t
+    else: 
+        dir = Path.home()
 
-    tf = NamedTemporaryFile(dir=dir, suffix='.tiff')
+    tf = NamedTemporaryFile(delete=False, dir=dir, suffix='.tiff')
+    tf.close()
 
     print(f'Downloading example image to {tf.name}')
     get_site_imagery(aoi, Path(tf.name))
