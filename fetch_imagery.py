@@ -2,8 +2,14 @@ import pystac_client as pystac
 import planetary_computer as pc
 import geopandas as gpd
 import rasterio
-from rasterio.merge import merge
-from rasterio.windows import from_bounds
+import rasterio.io as IO
+import rasterio.merge as Merge
+import rasterio.windows as Windows
+import rasterio.transform as Transform
+import rasterio.enums as Enums
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
+from time import time
 from pprint import pprint
 from tempfile import TemporaryDirectory
 from pathlib import Path
@@ -11,92 +17,184 @@ from contextlib import ExitStack
 from shapely.geometry import Polygon
 from tempfile import NamedTemporaryFile
 
-def get_site_imagery(aoi: gpd.GeoDataFrame, dst_path: Path, year: int=2023) -> bool:
-    aoi_geom = aoi.union_all().__geo_interface__
+@dataclass
+class RemoteRasterInfo:
+    id: str
+    image_href: str
 
+def download_windowed_tile(
+    aoi: gpd.GeoDataFrame, 
+    remote_raster: RemoteRasterInfo, 
+    max_spatial_res: tuple[float, float], 
+    out_dir: Path
+):
+    try:
+        id = remote_raster.id
+        url = remote_raster.image_href
+
+        with rasterio.open(url) as src:
+            src: IO.DatasetReader = src
+
+            window = Windows.from_bounds(
+                *aoi.to_crs(src.crs).total_bounds,
+                transform=src.transform
+            )
+            x_res, y_res = src.res
+
+            # take the larger pixels size 
+            # between the raster and the given 
+            # max spatial resolution
+            #
+            # A higher spatial resolution means a smaller
+            # pixel size, which is confusing 
+            # so the maximum resolution parameter
+            # is the smallest the pixels are allowed 
+            # to be in the resulting raster 
+            target_res = (
+                max(x_res, max_spatial_res[0]),
+                max(y_res, max_spatial_res[1])
+            )
+
+            # contain window to be within this raster
+            window_intersect = Windows.intersection(
+                window, 
+                Windows.Window(0, 0, src.width, src.height)
+            )
+
+            # size in meters of the image
+            image_width_m = window_intersect.width * x_res
+            image_height_m = window_intersect.height * y_res
+
+            # size in pixels of the image
+            image_width_px = round(image_width_m / target_res[0])
+            image_height_px = round(image_height_m / target_res[1])
+
+            data = src.read(
+                window=window_intersect,
+                out_shape=(4, image_height_px, image_width_px),
+                resampling=Enums.Resampling.average
+            )
+
+            # Get the bounds of the window, and get a new 
+            # transform based on the new resolution
+            window_intersect_bounds = Windows.bounds(
+                window_intersect,
+                src.transform
+            )
+            new_transform = Transform.from_bounds(
+                *window_intersect_bounds,
+                width=image_width_px,
+                height=image_height_px
+            )
+
+            new_profile = src.profile.copy()
+            new_profile.update(
+                driver='GTiff',
+                height=data.shape[1],
+                width=data.shape[2],
+                transform=new_transform,
+                count=4
+            )
+
+            dst_fp = out_dir / f'{id}.tif'
+            with rasterio.open(dst_fp, 'w', **new_profile) as dst:
+                dst.write(data)
+
+        return dst_fp
+    except Exception as e:
+        print(f"\nException caught while downloading windowed tile {id}: {e}")
+        return None
+
+def get_remote_rasters(aoi: gpd.GeoDataFrame, year: int):
     catalog = pystac.Client.open(
         "https://planetarycomputer.microsoft.com/api/stac/v1/",
         modifier=pc.sign_inplace,
     )
 
+    aoi_bounds = aoi.to_crs(epsg=4326).total_bounds
     search_res = catalog.search(
         collections=['naip'],
-        intersects=aoi_geom,
+        bbox=aoi_bounds,
     )
 
     try:
-        search_items = [
-            item for item 
-            in [item.to_dict() for item in search_res.items()]
-            if int(item['properties']['naip:year']) == year
+        remote_rasters_info = [
+            RemoteRasterInfo(si.id, si.assets['image'].href)
+            for si in search_res.item_collection()
+            if si.properties['naip:year'] == str(year)
         ]
-
-        search_item_ids = [si['id'] for si in search_items]
-        search_item_hrefs = [si['assets']['image']['href'] for si in search_items]
     except KeyError as ke:
         print(f"Couldn't find image link in search items: {ke}\nSearch item keys example: ")
-        pprint(search_items[0], indent=2, sort_dicts=False)
-        return False
-    except:
-        print("Error occurred")
-        return False
+        pprint(remote_rasters_info[0], indent=2, sort_dicts=False)
+        return None
+    except Exception as e:
+        print(f"Error occurred while reading from search items: {e}")
+        return None
 
-    print(f"Found {(found_count := len(search_items))} valid tiles that intersect the site from. {year}", end='')
+    print(f"Found {(found_count := len(remote_rasters_info))} valid tiles that intersect the site from {year}. ", end='')
     if found_count < 1:
-        print("\n\tNo tiles found! Stopping execution.")
-        return False
+        print("\n\tNo tiles found!")
+        return None
     print(f"Using these NAIP entities:")
-    for id in search_item_ids: print(f"\t{id}")
+    print('\n'.join([f'\t{rri.id}' for rri in remote_rasters_info]))
 
-    print('Downloading window images')
-    # Window raster files are kept here, and deleted when the context is finished
-    with TemporaryDirectory() as tmpdir: 
-        tmpdir = Path(tmpdir)
+    return remote_rasters_info
 
-        window_raster_paths = []
-        for id, href in zip(search_item_ids, search_item_hrefs):
-            # Open remote source raster
-            source_raster = rasterio.open(href)
+def get_site_imagery(
+    aoi: gpd.GeoDataFrame, 
+    dst_path: Path, 
+    max_spatial_res: tuple[float, float], 
+    year: int=2023,
+    max_workers=4,
+) -> bool:
+    remote_rasters_info = get_remote_rasters(aoi, year)
+    if not remote_rasters_info:
+        return False
 
-            window = from_bounds(
-                *aoi.to_crs(source_raster.crs).total_bounds,
-                transform = source_raster.transform
-            )
+    remote_raster_count = len(remote_rasters_info)
 
-            print(f'\tDownloading window data for entity {id}', end='', flush=True)
-            data = source_raster.read(window=window)
-            print(' -- Complete')
+    with TemporaryDirectory(delete=False) as temp_dir: 
+        temp_dir = Path(temp_dir)
 
-            transform = source_raster.window_transform(window)
-            profile = source_raster.profile.copy()
-            profile.update(
-                driver="GTiff",
-                height=data.shape[1],
-                width=data.shape[2],
-                transform=transform,
-                count=4
-            )
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            window_raster_paths = []
 
-            raster_path = tmpdir / f'{id}.tif'
-            print(f'\t\tWriting to {raster_path.name}', end='', flush=True)
-            with rasterio.open(raster_path, 'w', **profile) as dst:
-                dst.write(data)
-            print(' -- Complete')
+            print(f"Adding images into download queue with {max_workers} workers"); dawn = time()
+            futures = [
+                executor.submit(download_windowed_tile, aoi, rri, max_spatial_res, temp_dir)
+                for rri in remote_rasters_info
+            ]
 
-            window_raster_paths.append(raster_path)
+            for future in as_completed(futures):
+                try:
+                    res = future.result()
+                    if res:
+                        print(f"\tDownload success: {res}")
+                        window_raster_paths.append(res)
+                    else:
+                        print(f"\tDownload failed.")
+                except Exception as e:
+                    print(f"Exception: {e}")
+        downloaded_count = len(window_raster_paths)
+        print(f"\nDownloading {downloaded_count}/{remote_raster_count} windowed tiles took {time()-dawn} seconds.\n")
+
+        if downloaded_count < remote_raster_count:
+            print(f"Not all remote raster windows downloaded")
+            return False
 
         # Open each window raster for merging, 
         # use an exit stack to make sure all files 
         # are closed, so they can be cleaned up later
         with ExitStack() as stack:
             window_rasters = [
-                stack.enter_context(
-                    rasterio.open(wrp)
-                )
+                stack.enter_context(rasterio.open(wrp))
                 for wrp in window_raster_paths
             ]
-            mosaic, transform = merge(window_rasters)
-            mosaic_profile = source_raster.profile.copy()
+
+            mosaic, transform = Merge.merge(window_rasters)
+
+            with rasterio.open(remote_rasters_info[0].image_href) as src:
+                mosaic_profile = src.profile.copy()
             mosaic_profile.update(
                 driver="GTiff",
                 height=mosaic.shape[1],
@@ -129,8 +227,20 @@ if __name__ == '__main__':
     else: 
         dir = Path.home()
 
-    tf = NamedTemporaryFile(delete=False, dir=dir, suffix='.tiff')
-    tf.close()
+    imagery_tf = NamedTemporaryFile(delete=False, dir=dir, suffix='.tiff')
+    imagery_tf.close()
 
-    print(f'Downloading example image to {tf.name}')
-    get_site_imagery(aoi, Path(tf.name))
+
+    print(f'Downloading example image to {imagery_tf.name}')
+    res = get_site_imagery(aoi, Path(imagery_tf.name), (2.0, 2.0))
+
+    if res:
+        print("\tDownload success")
+    else:
+        print("\tDownload failed")
+
+    aoi_tf = NamedTemporaryFile(delete=False, dir=dir, suffix='.geojson')
+    aoi_tf.close()
+
+    aoi.to_file(aoi_tf.name, driver='GeoJson')
+    print(f'Saved example AOI to {aoi_tf.name}')
