@@ -19,27 +19,45 @@ def process_shape(aoi: gpd.GeoDataFrame, out_dir: Path, max_spatial_res: tuple[f
     imagery_file = out_dir / "imagery.tif"
 
     res = get_site_imagery(aoi, max_spatial_res, imagery_file, 8, 2023)
-    
     if not res:
         return False
 
     save_full_stats(imagery_file, aoi, max_spatial_res)
 
+    return True
+
 def process_shape_file(aoi_fp: Path, max_spatial_res: tuple[float, float]):
-    if not (aoi_fp.exists() and aoi_fp.is_file()):
-        print("The provided site file does't exist or is not a file!")
-        exit(1)
-
     try:
+        if not (aoi_fp.exists() and aoi_fp.is_file()):
+            print("The provided site file does't exist or is not a file!")
+            return False
+
         aoi = gpd.read_file(aoi_fp)
+
+        # conditionally add a column, 
+        # 'Site' is used to name output folders
+        if 'Site' not in aoi.columns:
+            aoi.insert(0, 'Site', aoi.index)
+
+        sites = [
+            aoi.iloc[[i]] for i in range(len(aoi))
+        ]
+
+        sites = sites[:1]
+
+        for site in sites:
+            if not (out_dir := aoi_fp.parent / aoi_fp.stem / f"{site['Site'][0]}").exists():
+                out_dir.mkdir(parents=True, exist_ok=True)
+
+            res = process_shape(site, out_dir, max_spatial_res)
+
+            if not res:
+                print(f"Site {site['Site']} processing failed")
+
+        return True
     except Exception as e:
-        print(f"Error opening site geometry file: {e}")
-        exit(1)
-
-    if not (out_dir := aoi_fp.parent / aoi_fp.stem).exists():
-        out_dir.mkdir(exist_ok=True)
-
-    return process_shape(aoi, out_dir, max_spatial_res)
+        print(f"Error processing shape file: {e}")
+        return False
 
 def main():
     parser = ArgumentParser()

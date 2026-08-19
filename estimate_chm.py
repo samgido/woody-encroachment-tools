@@ -9,7 +9,7 @@ from transformers import AutoImageProcessor, AutoModelForDepthEstimation
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-def estimate_chm(src_fp: Path, max_spatial_res: tuple[float, float]):
+def estimate_chm(src_fp: Path, max_spatial_res: tuple[float, float]) -> tuple[np.ndarray, tuple[float, float]]:
     try:
         with rasterio.open(src_fp) as src:
             if torch.cuda.is_available():
@@ -62,7 +62,7 @@ def estimate_chm(src_fp: Path, max_spatial_res: tuple[float, float]):
 
             return chm_data, target_res
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error during CHM estimation: {e}")
         return None
 
 if __name__ == "__main__":

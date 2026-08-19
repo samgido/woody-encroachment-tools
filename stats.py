@@ -11,22 +11,6 @@ from pprint import pprint
 
 from estimate_chm import estimate_chm
 
-def save_chm_stats(
-    chm_src_fp: Path, 
-    model_processing_time: float, 
-    results_dir: Path
-):
-    with rasterio.open(chm_src_fp) as chm_src:
-        stats = {
-            "masked": make_stats(masked_data),
-            "full": make_stats(chm_src.read()),
-            "processing_time": float(model_processing_time)
-        }
-        pprint(stats, indent=2)
-
-        with open(results_dir / "stats.json", 'w') as f:
-            json.dump(stats, f, indent=4)
-
 def make_stats(data, nodata: float):
     valid_data = data[data != nodata]
     percent_px_above_x = lambda x: float(data[data > x].size / valid_data.size)
@@ -42,7 +26,7 @@ def get_clipped_raster_data(
     chm_src_fp: Path,
     aoi: gpd.GeoDataFrame,
     nodata: float,
-):
+) -> np.ndarray | None:
     try:
         with rasterio.open(chm_src_fp) as chm_src:
             aoi_reproj = aoi.to_crs(chm_src.crs)
@@ -51,7 +35,9 @@ def get_clipped_raster_data(
             # this is operating on a CHM which
             # shouldn't have negative values
             masked_chm_data, _ = Mask.mask(chm_src, aoi_reproj.geometry, nodata=nodata, filled=False)
-            breakpoint()
+
+            # kill the band dimension, the other functions don't expect it
+            masked_chm_data = masked_chm_data[0]
 
             return masked_chm_data
     except Exception as e:
@@ -73,15 +59,18 @@ def save_binary_mask(data, threshold: float, profile, dst_fp: Path):
         print(f"Error saving binary mask: {e}")
         return False
 
-def save_chm(chm_data: np.ndarray, spatial_res: tuple[float, float], src_fp: Path, dst_fp: Path):
+def save_chm(chm_data: np.ndarray, spatial_res: tuple[float, float], nodata: float, src_fp: Path, dst_fp: Path):
     try:
-        new_transform = rasterio.Affine(
-            spatial_res[0], 0, src.transform.c,
-            0, -1 * spatial_res[1], src.transform.f
-        )
-
         with rasterio.open(src_fp) as src:
             profile = src.profile.copy()
+
+            new_transform = rasterio.Affine(
+                spatial_res[0], 0, src.transform.c,
+                0, -1 * spatial_res[1], src.transform.f
+            )
+
+        print("SHAPE: ", chm_data.shape)
+
         profile.update(
             driver='GTiff',
             count=1,
@@ -89,6 +78,7 @@ def save_chm(chm_data: np.ndarray, spatial_res: tuple[float, float], src_fp: Pat
             width=chm_data.shape[1],
             transform=new_transform,
             dtype='float32',
+            nodata=nodata,
         )
 
         with rasterio.open(dst_fp, 'w', **profile) as dst:
@@ -96,41 +86,63 @@ def save_chm(chm_data: np.ndarray, spatial_res: tuple[float, float], src_fp: Pat
 
         return dst_fp
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error saving CHM: {e}")
         return None
 
 def save_auxiliary_products(
     src_fp: Path,
-    spatial_res: tuple[float, float], 
-    dst_dir: Path
 ):
-    with rasterio.open(src_fp) as src:
-        src: IO.DatasetReader
-        pass
+    """
+    Calculates and saves the other statistics and products used for a CHM. 
+    Implemented to use the nodata value of the source raster, for a clipped CHM. 
+
+    Products
+    - Binary mask
+    - Min height
+    - Max height
+    - % area > [1m, 0.5m, 0.2m]
+    """
+    try:
+        with rasterio.open(src_fp) as src:
+            data = src.read()
+            nodata = src.nodata
+
+            stats = make_stats(data, nodata)
+
+            with open(src_fp.parent / f"{src_fp.stem}_stats.geojson", 'w') as f:
+                json.dump(stats, f)
+
+        return True
+    except Exception as e:
+        print(f"Error saving auxiliary products: {e}")
+        return False
 
 def save_full_stats(src_fp: Path, aoi: gpd.GeoDataFrame, max_spatial_res: tuple[float, float]):
-    results_dir = Path(src_fp.parent) / "stats"
-    results_dir.mkdir(parents=True, exist_ok=True)
+    # results_dir = Path(src_fp.parent) / "stats"
+    # results_dir.mkdir(parents=True, exist_ok=True)
+
+    nodata = -1
+
+    results_dir = Path(src_fp.parent)
 
     print(f"Beginning CHM estimation..."); dawn = time()
-
     res = estimate_chm(src_fp, max_spatial_res)
-    if not res:
-        return False
+    if res is None: return False
     chm_data, spatial_res = res
-
     dusk = time(); print(f"File at {src_fp} took {dusk-dawn}sec")
 
-    chm_src_fp = save_chm(chm_data, spatial_res, src_fp, results_dir / "chm.tif")
-    if not chm_src_fp:
-        return False
+    chm_src_fp = save_chm(chm_data, spatial_res, nodata, src_fp, results_dir / "chm.tif")
+    if chm_src_fp is None: return False
 
-    return True
+    save_auxiliary_products(chm_src_fp)
 
-    res = get_clipped_raster_data(chm_src_fp, aoi, results_dir)
-    if not res:
-        return False
-    masked_chm_data, clipped_chm_fp = res
+    masked_chm_data = get_clipped_raster_data(chm_src_fp, aoi, results_dir)
+    if masked_chm_data is None: return False
+
+    chm_masked_src_fp = save_chm(masked_chm_data, spatial_res, nodata, src_fp, results_dir / "masked_chm.tif")
+    if chm_masked_src_fp is None: return False
+
+    save_auxiliary_products(chm_masked_src_fp)
 
     print("Statistics calculated and saved.")
     return True
