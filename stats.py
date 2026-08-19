@@ -1,67 +1,31 @@
 import json
 import geopandas as gpd
 import rasterio 
-import rasterio.io as IO
 import rasterio.mask as Mask
+import rasterio.io as IO
+import numpy as np
+import numpy.ma as ma
 from pathlib import Path
 from time import time
 from pprint import pprint
 
-from estimate_chm import estimate_chm, save_chm
-
-def save_chm_stats_t(
-    chm_file: Path, 
-    aoi: gpd.GeoDataFrame, 
-    model_processing_time: float, 
-    results_dir: Path
-):
-    with rasterio.open(chm_file) as src:
-        full_data = src.read()
-
-        aoi_reproj = aoi.to_crs(src.crs)
-
-        # using nodata=-1 should be safe, since 
-        # this is operating on a CHM which
-        # shouldn't have negative values
-        nodata = -1
-        masked_data, _ = Mask.mask(src, aoi_reproj.geometry, nodata=nodata)
-
-    def make_stats(data):
-        num_px_in_mask = data[data > nodata].size
-        num_px_above_x = lambda d, x: d[d > x].size
-        return {
-            "min_height": float(data.min()),
-            "max_height": float(data.max()),
-            "percent_area_over_1m": float(num_px_above_x(data, 1) / num_px_in_mask) * 100,
-            "percent_area_over_50cm": float(num_px_above_x(data, 0.5) / num_px_in_mask) * 100,
-            "percent_area_over_20cm": float(num_px_above_x(data, 0.2) / num_px_in_mask) * 100,
-        }
-
-    stats = {
-        "masked": make_stats(masked_data),
-        "full": make_stats(full_data),
-        "processing_time": float(model_processing_time)
-    }
-    print(stats)
-
-    stats_file = results_dir / "stats.json"
-    with open(stats_file, 'w') as f:
-        json.dump(stats, f, indent=4)
+from estimate_chm import estimate_chm
 
 def save_chm_stats(
-    chm_src: IO.DatasetReader, 
+    chm_src_fp: Path, 
     model_processing_time: float, 
     results_dir: Path
 ):
-    stats = {
-        "masked": make_stats(masked_data),
-        "full": make_stats(chm_src.read()),
-        "processing_time": float(model_processing_time)
-    }
-    pprint(stats, indent=2)
+    with rasterio.open(chm_src_fp) as chm_src:
+        stats = {
+            "masked": make_stats(masked_data),
+            "full": make_stats(chm_src.read()),
+            "processing_time": float(model_processing_time)
+        }
+        pprint(stats, indent=2)
 
-    with open(results_dir / "stats.json", 'w') as f:
-        json.dump(stats, f, indent=4)
+        with open(results_dir / "stats.json", 'w') as f:
+            json.dump(stats, f, indent=4)
 
 def make_stats(data, nodata: float):
     valid_data = data[data != nodata]
@@ -74,27 +38,22 @@ def make_stats(data, nodata: float):
         "percent_area_over_20cm": percent_px_above_x(0.2) * 100,
     }
 
-def save_clipped_raster(
-    chm_src: IO.DatasetReader,
+def get_clipped_raster_data(
+    chm_src_fp: Path,
     aoi: gpd.GeoDataFrame,
-    results_dir: Path,
+    nodata: float,
 ):
     try:
-        aoi_reproj = aoi.to_crs(chm_src.crs)
+        with rasterio.open(chm_src_fp) as chm_src:
+            aoi_reproj = aoi.to_crs(chm_src.crs)
 
-        # using nodata=-1 should be safe, since 
-        # this is operating on a CHM which
-        # shouldn't have negative values
-        nodata = -1
-        masked_chm_data, _ = Mask.mask(chm_src, aoi_reproj.geometry, nodata=nodata)
+            # using nodata=-1 should be safe, since 
+            # this is operating on a CHM which
+            # shouldn't have negative values
+            masked_chm_data, _ = Mask.mask(chm_src, aoi_reproj.geometry, nodata=nodata, filled=False)
+            breakpoint()
 
-        dst_fp = results_dir / "chm_masked.tif"
-        with rasterio.open(dst_fp, 'w', **chm_src.profile) as dst:
-            saved_data = masked_chm_data.copy()
-            saved_data[saved_data == nodata] = 0
-            dst.write(saved_data)
-
-        return masked_chm_data, dst_fp
+            return masked_chm_data
     except Exception as e:
         print(f"Error saving clipped raster: {e}")
         return None
@@ -114,31 +73,67 @@ def save_binary_mask(data, threshold: float, profile, dst_fp: Path):
         print(f"Error saving binary mask: {e}")
         return False
 
-def save_full_stats(src_fp: Path, aoi: gpd.GeoDataFrame, max_spatial_res: tuple[float, float]):
+def save_chm(chm_data: np.ndarray, spatial_res: tuple[float, float], src_fp: Path, dst_fp: Path):
+    try:
+        new_transform = rasterio.Affine(
+            spatial_res[0], 0, src.transform.c,
+            0, -1 * spatial_res[1], src.transform.f
+        )
+
+        with rasterio.open(src_fp) as src:
+            profile = src.profile.copy()
+        profile.update(
+            driver='GTiff',
+            count=1,
+            height=chm_data.shape[0],
+            width=chm_data.shape[1],
+            transform=new_transform,
+            dtype='float32',
+        )
+
+        with rasterio.open(dst_fp, 'w', **profile) as dst:
+            dst.write(chm_data, 1)
+
+        return dst_fp
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
+
+def save_auxiliary_products(
+    src_fp: Path,
+    spatial_res: tuple[float, float], 
+    dst_dir: Path
+):
     with rasterio.open(src_fp) as src:
-        results_dir = Path(src_fp.parent) / f"{src_fp.stem}" 
-        if not results_dir.exists(): results_dir.mkdir()
+        src: IO.DatasetReader
+        pass
 
-        print(f"Beginning CHM estimation..."); dawn = time()
+def save_full_stats(src_fp: Path, aoi: gpd.GeoDataFrame, max_spatial_res: tuple[float, float]):
+    results_dir = Path(src_fp.parent) / "stats"
+    results_dir.mkdir(parents=True, exist_ok=True)
 
-        chm_data, spatial_res = estimate_chm(src, max_spatial_res)
-        if not (chm_data and spatial_res):
-            return False
+    print(f"Beginning CHM estimation..."); dawn = time()
 
-        dusk = time()
-        print(f"File at {src_fp} took {(processing_time := dusk - dawn)}sec")
+    res = estimate_chm(src_fp, max_spatial_res)
+    if not res:
+        return False
+    chm_data, spatial_res = res
 
-        chm_file = save_chm(chm_data, spatial_res, src, results_dir / "chm.tif")
-        if not chm_file:
-            return False
+    dusk = time(); print(f"File at {src_fp} took {dusk-dawn}sec")
 
-        with rasterio.open(chm_file) as chm_src:
-            res = save_clipped_raster(chm_src, aoi, results_dir)
-            if not res:
-                return False
-            masked_chm_data, clipped_chm_fp = res
+    chm_src_fp = save_chm(chm_data, spatial_res, src_fp, results_dir / "chm.tif")
+    if not chm_src_fp:
+        return False
 
-        print()
+    return True
+
+    res = get_clipped_raster_data(chm_src_fp, aoi, results_dir)
+    if not res:
+        return False
+    masked_chm_data, clipped_chm_fp = res
+
+    print("Statistics calculated and saved.")
+    return True
 
 if __name__ == '__main__':
     from shapely.geometry import Polygon
