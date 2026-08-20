@@ -132,7 +132,7 @@ def fetch_remote_rasters(aoi: gpd.GeoDataFrame, year: int):
             print(f"Error occurred while reading from search items: {e}")
             return None
 
-        print(f"Found {(found_count := len(remote_rasters_info))} valid tiles that intersect the site from {year}. ", end='')
+        print(f"Found {(found_count := len(remote_rasters_info))} valid tiles from year {year} that intersect the site. ", end='')
         if found_count < 1:
             print("\n\tNo tiles found!")
             return None

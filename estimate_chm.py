@@ -7,7 +7,9 @@ import rasterio.enums as Enums
 from pathlib import Path
 from transformers import AutoImageProcessor, AutoModelForDepthEstimation
 
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+MODEL_ID = "facebook/dinov3-vitl16-chmv2-dpt-head"
+
+processor = model = None
 
 def estimate_chm(src_fp: Path, max_spatial_res: tuple[float, float]) -> tuple[np.ndarray, tuple[float, float]]:
     try:
@@ -15,11 +17,9 @@ def estimate_chm(src_fp: Path, max_spatial_res: tuple[float, float]) -> tuple[np
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-            device = "cpu"
-
-            model_id = "facebook/dinov3-vitl16-chmv2-dpt-head"
-            processor = AutoImageProcessor.from_pretrained(model_id, trust_remote_code=True)
-            model = AutoModelForDepthEstimation.from_pretrained(model_id, trust_remote_code=True).to(device)
+            device = "cpu" # having issues with CUDA on my machine
+            if processor is None: processor = AutoImageProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            if model is None: model = AutoModelForDepthEstimation.from_pretrained(MODEL_ID, trust_remote_code=True).to(device)
 
             # put model in evaluation mode
             model.eval()
@@ -46,6 +46,7 @@ def estimate_chm(src_fp: Path, max_spatial_res: tuple[float, float]) -> tuple[np
             image = image[:3, :, :]          # extract (r, g, b) from (r, g, b, nir)
             image = image.transpose(1, 2, 0) # (bands, height, width) to (height, width, bands)
 
+            print(f"Loaded image of size {image.shape[1]} by {image.shape[0]} pixels, for a total size of {image.size} pixels")
             dawn=time(); print(f"Starting inference...", flush=True)
             inputs = processor(images=image, return_tensors="pt").to(model.device)
 

@@ -44,21 +44,6 @@ def get_clipped_raster_data(
         print(f"Error saving clipped raster: {e}")
         return None
 
-def save_binary_mask(data, threshold: float, profile, dst_fp: Path):
-    try:
-        binary_data = data.copy()
-
-        binary_data[binary_data > threshold] = 1
-        binary_data[binary_data <= threshold] = 0
-
-        with rasterio.open(dst_fp, 'w', **profile) as dst:
-            dst.write(binary_data)
-
-        return True
-    except Exception as e:
-        print(f"Error saving binary mask: {e}")
-        return False
-
 def save_chm(chm_data: np.ndarray, spatial_res: tuple[float, float], nodata: float, src_fp: Path, dst_fp: Path):
     try:
         with rasterio.open(src_fp) as src:
@@ -68,8 +53,6 @@ def save_chm(chm_data: np.ndarray, spatial_res: tuple[float, float], nodata: flo
                 spatial_res[0], 0, src.transform.c,
                 0, -1 * spatial_res[1], src.transform.f
             )
-
-        print("SHAPE: ", chm_data.shape)
 
         profile.update(
             driver='GTiff',
@@ -89,9 +72,7 @@ def save_chm(chm_data: np.ndarray, spatial_res: tuple[float, float], nodata: flo
         print(f"Error saving CHM: {e}")
         return None
 
-def save_auxiliary_products(
-    src_fp: Path,
-):
+def save_auxiliary_products(src_fp: Path) -> bool:
     """
     Calculates and saves the other statistics and products used for a CHM. 
     Implemented to use the nodata value of the source raster, for a clipped CHM. 
@@ -110,7 +91,7 @@ def save_auxiliary_products(
             stats = make_stats(data, nodata)
 
             with open(src_fp.parent / f"{src_fp.stem}_stats.geojson", 'w') as f:
-                json.dump(stats, f)
+                json.dump(stats, f, indent=4)
 
         return True
     except Exception as e:
@@ -118,9 +99,6 @@ def save_auxiliary_products(
         return False
 
 def save_full_stats(src_fp: Path, aoi: gpd.GeoDataFrame, max_spatial_res: tuple[float, float]):
-    # results_dir = Path(src_fp.parent) / "stats"
-    # results_dir.mkdir(parents=True, exist_ok=True)
-
     nodata = -1
 
     results_dir = Path(src_fp.parent)
@@ -134,7 +112,8 @@ def save_full_stats(src_fp: Path, aoi: gpd.GeoDataFrame, max_spatial_res: tuple[
     chm_src_fp = save_chm(chm_data, spatial_res, nodata, src_fp, results_dir / "chm.tif")
     if chm_src_fp is None: return False
 
-    save_auxiliary_products(chm_src_fp)
+    res = save_auxiliary_products(chm_src_fp)
+    if not res: return False
 
     masked_chm_data = get_clipped_raster_data(chm_src_fp, aoi, results_dir)
     if masked_chm_data is None: return False
@@ -142,7 +121,8 @@ def save_full_stats(src_fp: Path, aoi: gpd.GeoDataFrame, max_spatial_res: tuple[
     chm_masked_src_fp = save_chm(masked_chm_data, spatial_res, nodata, src_fp, results_dir / "masked_chm.tif")
     if chm_masked_src_fp is None: return False
 
-    save_auxiliary_products(chm_masked_src_fp)
+    res = save_auxiliary_products(chm_masked_src_fp)
+    if not res: return False
 
     print("Statistics calculated and saved.")
     return True

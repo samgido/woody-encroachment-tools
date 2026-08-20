@@ -16,15 +16,19 @@ def parse_tuple(inp):
         raise argparse.ArgumentTypeError("Tuple must be of the form (x1,x2,x3) e.g. (1.0, 2.0)")
 
 def process_shape(aoi: gpd.GeoDataFrame, out_dir: Path, max_spatial_res: tuple[float, float]):
-    imagery_file = out_dir / "imagery.tif"
+    try:
+        imagery_file = out_dir / "imagery.tif"
 
-    res = get_site_imagery(aoi, max_spatial_res, imagery_file, 8, 2023)
-    if not res:
+        res = get_site_imagery(aoi, max_spatial_res, imagery_file, 8, 2023)
+        if not res:
+            return False
+
+        save_full_stats(imagery_file, aoi, max_spatial_res)
+
+        return True
+    except Exception as e:
+        print(f"Error processing shape: {e}")
         return False
-
-    save_full_stats(imagery_file, aoi, max_spatial_res)
-
-    return True
 
 def process_shape_file(aoi_fp: Path, max_spatial_res: tuple[float, float]):
     try:
@@ -43,16 +47,16 @@ def process_shape_file(aoi_fp: Path, max_spatial_res: tuple[float, float]):
             aoi.iloc[[i]] for i in range(len(aoi))
         ]
 
-        sites = sites[:1]
-
         for site in sites:
-            if not (out_dir := aoi_fp.parent / aoi_fp.stem / f"{site['Site'][0]}").exists():
+            site_name = site['Site'].iloc[0]
+            if not (out_dir := aoi_fp.parent / aoi_fp.stem / f"{site_name}").exists():
                 out_dir.mkdir(parents=True, exist_ok=True)
 
+            print(f"Processing shape {site_name}")
             res = process_shape(site, out_dir, max_spatial_res)
 
             if not res:
-                print(f"Site {site['Site']} processing failed")
+                print(f"Site {site['Site'][0]} processing failed")
 
         return True
     except Exception as e:
