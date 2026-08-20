@@ -7,7 +7,6 @@ import rasterio.merge as Merge
 import rasterio.windows as Windows
 import rasterio.transform as Transform
 import rasterio.enums as Enums
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from time import time
 from pprint import pprint
@@ -148,7 +147,6 @@ def get_site_imagery(
     aoi: gpd.GeoDataFrame, 
     max_spatial_res: tuple[float, float], 
     dst_path: Path, 
-    max_workers: int,
     year: int,
 ) -> bool:
     """
@@ -166,25 +164,24 @@ def get_site_imagery(
         with TemporaryDirectory(delete=False) as temp_dir: 
             temp_dir = Path(temp_dir)
 
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                window_raster_paths = []
+            dawn=time(); print(f"Beginning windowed tile download(s)...")
+            window_raster_paths = []
+            for rri in remote_rasters_info:
+                print(f"\tDownloading {rri.id}... ", end='')
 
-                print(f"Adding images into download queue with {max_workers} workers"); dawn=time()
-                futures = [
-                    executor.submit(download_windowed_tile, aoi, rri, max_spatial_res, temp_dir)
-                    for rri in remote_rasters_info
-                ]
+                res = download_windowed_tile(aoi, rri, max_spatial_res, temp_dir)
 
-                for future in as_completed(futures):
-                    try:
-                        res = future.result()
-                        if res:
-                            print(f"\tDownload success: {res}")
-                            window_raster_paths.append(res)
-                        else:
-                            print(f"\tDownload failed.")
-                    except Exception as e:
-                        print(f"Exception: {e}")
+                if res is None:
+                    print(f"Error downlading windowed tile.")
+                    return False
+                else:
+                    window_raster_paths.append(res)
+                    print("Complete!")
+
+            if any([wrp is None for wrp in window_raster_paths]):
+                print(f"Failed to download all windowed tiles. Downloaded {len([wrp for wrp in window_raster_paths if wrp is not None])}/{len(window_raster_paths)} windowed tiles.")
+                return False
+
             downloaded_count = len(window_raster_paths)
             dusk=time(); print(f"Downloading {downloaded_count}/{remote_raster_count} windowed tiles took {dusk-dawn} seconds.")
 

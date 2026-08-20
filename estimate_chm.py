@@ -9,9 +9,11 @@ from transformers import AutoImageProcessor, AutoModelForDepthEstimation
 
 MODEL_ID = "facebook/dinov3-vitl16-chmv2-dpt-head"
 
-processor = model = None
+processor = None
+model = None
 
 def estimate_chm(src_fp: Path, max_spatial_res: tuple[float, float]) -> tuple[np.ndarray, tuple[float, float]]:
+    global processor, model
     try:
         with rasterio.open(src_fp) as src:
             if torch.cuda.is_available():

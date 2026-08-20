@@ -19,7 +19,7 @@ def process_shape(aoi: gpd.GeoDataFrame, out_dir: Path, max_spatial_res: tuple[f
     try:
         imagery_file = out_dir / "imagery.tif"
 
-        res = get_site_imagery(aoi, max_spatial_res, imagery_file, 8, 2023)
+        res = get_site_imagery(aoi, max_spatial_res, imagery_file, 2023)
         if not res:
             return False
 
@@ -49,14 +49,22 @@ def process_shape_file(aoi_fp: Path, max_spatial_res: tuple[float, float]):
 
         for site in sites:
             site_name = site['Site'].iloc[0]
-            if not (out_dir := aoi_fp.parent / aoi_fp.stem / f"{site_name}").exists():
+            if not (
+                out_dir := aoi_fp.parent / f"{aoi_fp.stem}_{max_spatial_res[0]}_{max_spatial_res[1]}" / f"{site_name}"
+            ).exists():
                 out_dir.mkdir(parents=True, exist_ok=True)
+            else:
+                print("Warning: output directory for this shape already exists!")
 
             print(f"Processing shape {site_name}")
+            print("==========================================")
             res = process_shape(site, out_dir, max_spatial_res)
 
             if not res:
                 print(f"Site {site['Site'][0]} processing failed")
+            else:
+                print("==========================================")
+                print(f"Processing shape {site_name} COMPLETE.\n")
 
         return True
     except Exception as e:

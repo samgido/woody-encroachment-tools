@@ -107,7 +107,7 @@ def save_full_stats(src_fp: Path, aoi: gpd.GeoDataFrame, max_spatial_res: tuple[
     res = estimate_chm(src_fp, max_spatial_res)
     if res is None: return False
     chm_data, spatial_res = res
-    dusk = time(); print(f"File at {src_fp} took {dusk-dawn}sec")
+    dusk = time(); print(f"CHM estimation complete! Took {(dusk-dawn):.2f} seconds.")
 
     chm_src_fp = save_chm(chm_data, spatial_res, nodata, src_fp, results_dir / "chm.tif")
     if chm_src_fp is None: return False
