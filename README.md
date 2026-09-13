@@ -1,24 +1,65 @@
-# Tall Vegetation Analysis Suite
+# Woody Encroachment Tools
 
-These scripts are tools to estimate the extent of woody encroachment over a defined area. It was developed for and used in [THIS PAPER]. 
+> [!WARNING]
+> This repository is a WIP 
 
-## Usage
-### Setup
-Run the two commands below to get the conda environment setup
+These scripts were built to estimate the cover of woody vegetation over a defined area, typically a watershed. 
+They were initially developed for and used in [THIS PAPER]
+
+## Setup
+
+Before running the code, run the following commands to set up the environment. 
+This project has some heavy dependencies, so we use the [conda](https://conda-forge.org/download/) package manager to keep everything neat. 
+
+> [!TIP]
+> On Windows, conda can easily be installed by running the command `winget install CondaForge.Miniforge3` in the terminal. Then run `conda init` in the Miniforge Prompt application. 
+>
+> On Mac, with `brew install --cask miniforge`. 
+
+Create an environment with the necessary packages 
 
 ```
 conda create -f environment.yml 
 ```
+
+This may take a few minutes. 
+
+## General Use 
+
+First, activate the conda environment 
+
 ```
-conda activate tall-veg
+conda activate we-tools
 ```
 
-Finally, install the M2M package manually from [this](https://github.com/MrChebur/usgs-machine-to-machine-API) repository with this command, be sure the conda environment is activated 
+Prepare a shapefile with the desired sites to be analyzed, and run the command 
 
 ```
-pip install https://github.com/MrChebur/usgs-machine-to-machine-API/archive/master.zip
+python main.py /path/to/shapefile
 ```
 
-### 
+> [!WARNING]
+> On Windows, I get import errors from `rasterio` if I have GDAL on my path anywhere. 
+> Try removing GDAL from path, or uninstalling entirely, if you have similar issues. 
+> Some info [here](https://github.com/conda-forge/rasterio-feedstock/issues/349#issuecomment-5522251038).
+
+
+Assuming the program was able to read the shapefile, a folder is created next to the file. 
+Inside this folder, a folder is created for each site geometry in the file, and once the process is complete all results will be in these folders. 
+
+For example, running `python main.py /path/to/my-sites.shp` would create a folder structure like for the output
+
+```
+my-sites.shp
+my-sites/
+├─ site1/
+├─ site2/
+├─ site3/
+```
+
+Each site folder should have the same files in them. If not, check the output of the program to see what went wrong. 
 
 ## Acknowledgements
+
+This project uses pre-trained weights from [Meta's CHMv2 & DINOv3 model](https://github.com/facebookresearch/dinov3).
+Thank you to the original authors and the World Resources Institute for releasing these models. 

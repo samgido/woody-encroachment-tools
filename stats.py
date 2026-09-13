@@ -1,13 +1,10 @@
-import json
-import geopandas as gpd
-import rasterio 
 import rasterio.mask as Mask
-import rasterio.io as IO
+import rasterio 
 import numpy as np
-import numpy.ma as ma
+import geopandas as gpd
+import json
 from pathlib import Path
 from time import time
-from pprint import pprint
 
 from estimate_chm import estimate_chm
 

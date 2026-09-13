@@ -1,4 +1,4 @@
-name: tall-veg
+name: we-tools
 channels:
   - conda-forge
 dependencies:

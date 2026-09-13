@@ -1,11 +1,10 @@
-import os
-from time import time
+import rasterio.enums as Enums
+import rasterio
 import numpy as np
 import torch
-import rasterio
-import rasterio.enums as Enums
-from pathlib import Path
 from transformers import AutoImageProcessor, AutoModelForDepthEstimation
+from pathlib import Path
+from time import time
 
 MODEL_ID = "facebook/dinov3-vitl16-chmv2-dpt-head"
 

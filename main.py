@@ -1,11 +1,9 @@
 import geopandas as gpd
-from pathlib import Path
-import rasterio
 import argparse
 from argparse import ArgumentParser
+from pathlib import Path
 
 from fetch_imagery import get_site_imagery
-from estimate_chm import estimate_chm
 from stats import save_full_stats
 
 def parse_tuple(inp):
@@ -81,7 +79,8 @@ def main():
     parser.add_argument(
         '--spatial-res',
         type=parse_tuple,
-        default=(2.0, 2.0)
+        default=(2.0, 2.0),
+        help='Spatial resolution of imagery used, include quotations if using decimals. e.g. a 2 meter by 2 meter resolution: "2.0,2.0" or "2,2"'
     )
     args = parser.parse_args()
 
