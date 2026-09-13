@@ -1,91 +1,81 @@
-from time import time
-import json
+import rasterio.enums as Enums
+import rasterio
 import numpy as np
-from pathlib import Path
 import torch
-from PIL import Image
-import tifffile as tf
-from tempfile import NamedTemporaryFile
-
 from transformers import AutoImageProcessor, AutoModelForDepthEstimation
+from pathlib import Path
+from time import time
 
-model_id = "facebook/dinov3-vitl16-chmv2-dpt-head"
-processor = AutoImageProcessor.from_pretrained(model_id, trust_remote_code=True)
-model = AutoModelForDepthEstimation.from_pretrained(model_id, device_map="auto", trust_remote_code=True)
+MODEL_ID = "facebook/dinov3-vitl16-chmv2-dpt-head"
 
+processor = None
+model = None
 
-def get_depth(imagery_file: Path):
-    image = Image.open(imagery_file)
+def estimate_chm(src_fp: Path, max_spatial_res: tuple[float, float]) -> tuple[np.ndarray, tuple[float, float]]:
+    global processor, model
+    try:
+        with rasterio.open(src_fp) as src:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
-    dawn = time()
-    inputs = processor(images=image, return_tensors="pt").to(model.device)
+            device = "cpu" # having issues with CUDA on my machine
+            if processor is None: processor = AutoImageProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            if model is None: model = AutoModelForDepthEstimation.from_pretrained(MODEL_ID, trust_remote_code=True).to(device)
 
-    with torch.no_grad():
-        outputs = model(**inputs)
+            # put model in evaluation mode
+            model.eval()
 
-    depth = processor.post_process_depth_estimation(
-        outputs, target_sizes=[(image.height, image.width)]
-    )[0]["predicted_depth"]
-    dusk = time()
-    print(f"File at {imagery_file} took {(process_time := dusk - dawn)}sec")
+            x_res, y_res = src.res
 
-    return depth.numpy(), process_time
+            # Downsample the image if it's below the target resolution
+            # otherwise, just use the exisitng res
+            target_res = (
+                max(max_spatial_res[0], x_res),
+                max(max_spatial_res[1], y_res)
+            )
 
-def save_chms(data: np.ndarray, results_dir: Path):
-    # CHM
-    chm_file = results_dir / "chm.tif"
-    if tf.imwrite(chm_file, data) is not None:
-        print(f"Writing CHM to {chm_file}")
+            scale_x = x_res / target_res[0]
+            scale_y = y_res / target_res[1]
 
-    # Binary CHM 
-    mask_height = 1 # meter
-    data_masked = data.copy()
-    data_masked[data_masked > mask_height] = 1
-    data_masked[data_masked < mask_height] = 0
-    chm_masked_file = results_dir / "chm_1m_masked.tif"
-    if tf.imwrite(chm_masked_file, data_masked) is not None:
-        print(f"Writing CHM masked to {chm_masked_file}")
+            width = round(src.width * scale_x)
+            height = round(src.height * scale_y)
 
-def save_chm_stats(data: np.ndarray, processing_time, results_dir: Path):
-    stats = {
-        "min_height": float(data.min()),
-        "max_height": float(data.max()),
-        "percent_area_over_1m": float(data[data > 1].size / data.size) * 100,
-        "percent_area_over_50cm": float(data[data > 0.5].size / data.size) * 100,
-        "percent_area_over_20cm": float(data[data > 0.2].size / data.size) * 100,
-        "processing_time": float(processing_time)
-    }
-    print(stats)
+            image = src.read(
+                out_shape=(src.count, height, width),
+                resampling=Enums.Resampling.average
+            )
+            image = image[:3, :, :]          # extract (r, g, b) from (r, g, b, nir)
+            image = image.transpose(1, 2, 0) # (bands, height, width) to (height, width, bands)
 
-    stats_file = results_dir / "stats.json"
-    with open(stats_file, 'w') as f:
-        json.dump(stats, f, indent=4)
+            print(f"Loaded image of size {image.shape[1]} by {image.shape[0]} pixels, for a total size of {image.size} pixels")
+            dawn=time(); print(f"Starting inference...", flush=True)
+            inputs = processor(images=image, return_tensors="pt").to(model.device)
 
-def save_full_results(raster_file: Path):
-    print("===========================================")
-    print(f"Starting analysis on {raster_file.stem}")
-    print("===========================================")
+            with torch.inference_mode():
+                outputs = model(**inputs)
 
-    results_dir = Path(raster_file.parent) / f"{raster_file.stem}" 
-    results_dir.mkdir()
+            chm_data = processor.post_process_depth_estimation(
+                outputs, target_sizes=[(image.shape[0], image.shape[1])]
+            )[0]["predicted_depth"]
 
-    chm_data, processing_time = get_depth(raster_file)
-    save_chms(chm_data, results_dir)
-    save_chm_stats(chm_data, processing_time, results_dir)
+            chm_data = chm_data.detach().cpu().numpy()
 
-    print()
+            dusk=time(); print(f"Inference completed in {dusk-dawn} seconds.", flush=True)
 
-def process_rasters_in_dir(dir: Path):
-    if not (dir.exists() and dir.is_dir()):
-        print("Invalid input directory")
-        exit(1)
-
-    files = [p for p in dir.iterdir() if p.suffix == '.tif']
-    for file in files:
-        save_full_results(file)
+            return chm_data, target_res
+    except Exception as e:
+        print(f"Error during CHM estimation: {e}")
+        return None
 
 if __name__ == "__main__":
-    # path = Path(r"C:\Users\samue\Downloads\sam20.tif")
-    # save_full_results(path)
+    from argparse import ArgumentParser
 
-    pass
+    parser = ArgumentParser()
+    parser.add_argument(
+        'imagery_fp', 
+        help="Path to imagery file to run CHM estimation on.",
+        type=Path,
+    )
+    parser.add_argument(
+        ''
+    )
