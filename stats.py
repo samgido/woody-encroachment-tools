@@ -10,20 +10,26 @@ from estimate_chm import estimate_chm
 
 def make_stats(data, nodata: float):
     valid_data = data[data != nodata]
-    percent_px_above_x = lambda x: float(data[data > x].size / valid_data.size)
-    return {
+    percent_px_above_x = lambda x: float(data[data > x].size / valid_data.size) * 100.0
+
+    stats = {
         "min_height": float(valid_data.min()),
         "max_height": float(valid_data.max()),
-        "percent_area_over_1m": percent_px_above_x(1) * 100,
-        "percent_area_over_50cm": percent_px_above_x(0.5) * 100,
-        "percent_area_over_20cm": percent_px_above_x(0.2) * 100,
+        "percent_area_over_1m": percent_px_above_x(1),
+        "percent_area_over_50cm": percent_px_above_x(0.5),
+        "percent_area_over_20cm": percent_px_above_x(0.2),
     }
 
-def get_clipped_raster_data(
+    return stats
+
+def get_clipped_chm_data(
     chm_src_fp: Path,
     aoi: gpd.GeoDataFrame,
     nodata: float,
 ) -> np.ndarray | None:
+    """
+    Clip CHM raster data by an AOI, returns a masked numpy array
+    """
     try:
         with rasterio.open(chm_src_fp) as chm_src:
             aoi_reproj = aoi.to_crs(chm_src.crs)
@@ -42,6 +48,9 @@ def get_clipped_raster_data(
         return None
 
 def save_chm(chm_data: np.ndarray, spatial_res: tuple[float, float], nodata: float, src_fp: Path, dst_fp: Path):
+    """
+    Save raw data with the same geospatial profile as the given raster
+    """
     try:
         with rasterio.open(src_fp) as src:
             profile = src.profile.copy()
@@ -75,7 +84,6 @@ def save_auxiliary_products(src_fp: Path) -> bool:
     Implemented to use the nodata value of the source raster, for a clipped CHM. 
 
     Products
-    - Binary mask
     - Min height
     - Max height
     - % area > [1m, 0.5m, 0.2m]
@@ -95,7 +103,10 @@ def save_auxiliary_products(src_fp: Path) -> bool:
         print(f"Error saving auxiliary products: {e}")
         return False
 
-def save_full_stats(src_fp: Path, aoi: gpd.GeoDataFrame, max_spatial_res: tuple[float, float]):
+def save_full_products(src_fp: Path, aoi: gpd.GeoDataFrame, max_spatial_res: tuple[float, float]):
+    """
+    Creates and saves all of the output products for the script
+    """
     nodata = -1
 
     results_dir = Path(src_fp.parent)
@@ -103,8 +114,9 @@ def save_full_stats(src_fp: Path, aoi: gpd.GeoDataFrame, max_spatial_res: tuple[
     print(f"Beginning CHM estimation..."); dawn = time()
     res = estimate_chm(src_fp, max_spatial_res)
     if res is None: return False
-    chm_data, spatial_res = res
     dusk = time(); print(f"CHM estimation complete! Took {(dusk-dawn):.2f} seconds.")
+
+    chm_data, spatial_res = res
 
     chm_src_fp = save_chm(chm_data, spatial_res, nodata, src_fp, results_dir / "chm.tif")
     if chm_src_fp is None: return False
@@ -112,7 +124,7 @@ def save_full_stats(src_fp: Path, aoi: gpd.GeoDataFrame, max_spatial_res: tuple[
     res = save_auxiliary_products(chm_src_fp)
     if not res: return False
 
-    masked_chm_data = get_clipped_raster_data(chm_src_fp, aoi, results_dir)
+    masked_chm_data = get_clipped_chm_data(chm_src_fp, aoi, results_dir)
     if masked_chm_data is None: return False
 
     chm_masked_src_fp = save_chm(masked_chm_data, spatial_res, nodata, src_fp, results_dir / "masked_chm.tif")
@@ -138,4 +150,4 @@ if __name__ == '__main__':
         crs='EPSG:4326'
     )
 
-    save_full_stats(Path(r"C:\Users\samue\Downloads\tmp_tpg6su9.tiff"), aoi, (2.0, 2.0))
+    save_full_products(Path(r"C:\Users\samue\Downloads\tmp_tpg6su9.tiff"), aoi, (2.0, 2.0))

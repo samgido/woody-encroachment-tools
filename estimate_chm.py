@@ -12,6 +12,11 @@ processor = None
 model = None
 
 def estimate_chm(src_fp: Path, max_spatial_res: tuple[float, float]) -> tuple[np.ndarray, tuple[float, float]]:
+    """
+    Runs the CHMv2 model on a raster.
+    
+    May save the results at a different spatial resolution from the input file.
+    """
     global processor, model
     try:
         with rasterio.open(src_fp) as src:

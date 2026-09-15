@@ -27,6 +27,9 @@ def download_windowed_tile(
     max_spatial_res: tuple[float, float], 
     out_dir: Path
 ):
+    """
+    Downloads raster data within the AOI from a remote raster
+    """
     try:
         id = remote_raster.id
         url = remote_raster.image_href

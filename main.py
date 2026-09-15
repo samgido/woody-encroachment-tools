@@ -4,7 +4,7 @@ from argparse import ArgumentParser
 from pathlib import Path
 
 from fetch_imagery import get_site_imagery
-from stats import save_full_stats
+from stats import save_full_products
 
 def parse_tuple(inp):
     try:
@@ -21,7 +21,7 @@ def process_shape(aoi: gpd.GeoDataFrame, out_dir: Path, max_spatial_res: tuple[f
         if not res:
             return False
 
-        save_full_stats(imagery_file, aoi, max_spatial_res)
+        save_full_products(imagery_file, aoi, max_spatial_res)
 
         return True
     except Exception as e:
