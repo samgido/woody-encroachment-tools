@@ -11,11 +11,12 @@ They were initially developed for and used in [THIS PAPER]
 The very first step is to get access to Meta's CHMv2 model. Visit [this site](https://huggingface.co/facebook/dinov3-vitl16-chmv2-dpt-head), create an account and request access to the model, you'll use this account at a later step. 
 They usually grant access within a few days. 
 
-Before running the code, run the following commands to set up the environment. 
-This project has some heavy dependencies, so we use the [conda](https://conda-forge.org/download/) package manager to keep everything neat. 
+Before running the code, go through this section's steps to setup the python environment. 
+This project has some heavy dependencies (e.g. GDAL, planetarycomputer), so we use the `conda` package manager. 
+Go [here](https://conda-forge.org/download/) to download `conda`. 
 
 > [!TIP]
-> On Windows, conda can easily be installed by running the command `winget install CondaForge.Miniforge3` in the terminal. Then run `conda init` in the Miniforge Prompt application. 
+> On Windows, an easy way to install conda is with `winget install CondaForge.Miniforge3` in the terminal. Then run `conda init` in the Miniforge Prompt application. 
 >
 > On Mac, with `brew install --cask miniforge`. 
 
@@ -32,7 +33,7 @@ Next, we need to link this python environment with the account that has access t
 conda activate we-tools
 ```
 
-And run `hf auth login` to login to the hugging face account by following the instructions printed to the terminal. 
+Finally run `hf auth login` to login to the hugging face account you made earlier by following the instructions printed to the terminal. 
 That should be all of the setup steps. 
 
 ## General Use 
@@ -51,9 +52,10 @@ python main.py /path/to/shapefile
 
 
 Assuming the program was able to read the shapefile, a folder is created next to the file. 
-Inside this folder, a folder is created for each site geometry in the file, and once the process is complete all results will be in these folders. 
+Inside this folder, a folder is created for each site geometry in the file. 
+The script will place the results for each site into their respective folders. 
 
-For example, running `python main.py /path/to/my-sites.shp` would create a folder structure like for the output
+For example, running `python main.py /path/to/my-sites.shp` would create a folder structure like this
 
 ```
 my-sites.shp
@@ -63,7 +65,7 @@ my-sites/
 ├─ site3/
 ```
 
-Each site folder should have the same files in them. If not, check the output of the program to see what went wrong. 
+Each site folder should have the same files in them. If not, check the output of the program to see what went wrong.  
 
 ## Acknowledgements
 
